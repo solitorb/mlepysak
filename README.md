@@ -11,7 +11,6 @@
 - Recursive directory traversal for SQL files
 - Optional S3 upload functionality
 - SSL mode support for PostgreSQL connections
-- Version information display
 - Comprehensive logging
 
 ## Installation
