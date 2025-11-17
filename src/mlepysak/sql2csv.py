@@ -128,7 +128,7 @@ def run_sql_script(
         raise
 
 
-def upload_to_s3(file_name: str, output_dir: str) -> None:
+def upload_to_s3(file_name: str, file_path: str) -> None:
     """
     Uploads a file to an S3 bucket using AWS credentials from environment variables.
 
@@ -155,7 +155,7 @@ def upload_to_s3(file_name: str, output_dir: str) -> None:
             endpoint_url=os.getenv("DO_ENDPOINT_URL"),
         )
         # Construct the full path to the file to be uploaded
-        file_path = os.path.join(output_dir, file_name)
+        # file_path = os.path.join(output_dir, file_name)
         # Upload the file to the specified S3 bucket
         logger.debug(
             f"    Uploading {file_path} to S3 bucket {os.getenv('S3_BUCKET_NAME')}"
@@ -274,7 +274,7 @@ def process_sql_file(file_path: str, args, output_dir: str, input_sql_dir: str) 
                 writer.writerow([line])
 
         # Upload the CSV file to S3
-        # upload_to_s3(csv_file_name, args.output_dir)
+        upload_to_s3(csv_file_name, csv_file_path)
         logger.info(f"  File {file_name} processed successfully")
     except Exception as e:
         # Print an error message if processing the file fails

@@ -16,9 +16,9 @@ Classifier: Topic :: Utilities
 Requires-Dist: boto3
 Requires-Dist: psycopg2-binary
 Requires-Dist: python-dotenv
-Project-URL: Bug Tracker, https://github.com/cosmoid/mlepysak/issues
-Project-URL: Homepage, https://github.com/cosmoid/mlepysak
-Project-URL: Repository, https://github.com/cosmoid/mlepysak
+Project-URL: Bug Tracker, https://github.com/solitorb/mlepysak/issues
+Project-URL: Homepage, https://github.com/solitorb/mlepysak
+Project-URL: Repository, https://github.com/solitorb/mlepysak
 Description-Content-Type: text/markdown
 
 # mlepysak
@@ -34,7 +34,6 @@ Description-Content-Type: text/markdown
 - Recursive directory traversal for SQL files
 - Optional S3 upload functionality
 - SSL mode support for PostgreSQL connections
-- Version information display
 - Comprehensive logging
 
 ## Installation
