@@ -156,11 +156,16 @@ def upload_to_s3(file_name: str, file_path: str) -> None:
         )
         # Construct the full path to the file to be uploaded
         # file_path = os.path.join(output_dir, file_name)
-        # Upload the file to the specified S3 bucket
+        # Upload the file to the specified S3 bucket with public-read ACL
         logger.debug(
             f"    Uploading {file_path} to S3 bucket {os.getenv('S3_BUCKET_NAME')}"
         )
-        s3.upload_file(file_path, os.getenv("S3_BUCKET_NAME"), file_name)
+        s3.upload_file(
+            file_path,
+            os.getenv("S3_BUCKET_NAME"),
+            file_name,
+            ExtraArgs={"ACL": "public-read"},
+        )
         # Log successful upload
         log_s3_upload_success(file_name)
     except Exception as e:
