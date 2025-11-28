@@ -2,8 +2,8 @@
 
 """
 sql2csv   - SQL to CSV converter
-Copyright - (c) 2025 Rudra / VeeraBhadraReddy / cosmoid
-Licence   - MIT
+Copyright - (C) 2025 Rudra / VeeraBhadraReddy / cosmoid / Andy Freeman
+License   - MIT
 """
 
 import argparse
@@ -15,6 +15,7 @@ from typing import Dict, Optional
 
 import boto3
 import psycopg2
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 # Configure logging with proper formatting
@@ -147,9 +148,14 @@ def upload_to_s3(file_name: str, file_path: str) -> None:
     try:
         # Retrieve AWS credentials from environment variables
         # These credentials are typically set using a .env file or exported environment variables
+        # On very new attempt, the bucket does not exist
+        bucket_exists: bool = False
+        do_s3_bucket = os.getenv("S3_BUCKET_NAME")
+        region = os.getenv("DO_REGION_NAME")
+
         s3 = boto3.client(
             "s3",
-            region_name=os.getenv("DO_REGION_NAME"),
+            region_name=region,
             aws_access_key_id=os.getenv("DO_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("DO_SECRET_ACCESS_KEY"),
             endpoint_url=os.getenv("DO_ENDPOINT_URL"),
@@ -157,17 +163,65 @@ def upload_to_s3(file_name: str, file_path: str) -> None:
         # Construct the full path to the file to be uploaded
         # file_path = os.path.join(output_dir, file_name)
         # Upload the file to the specified S3 bucket with public-read ACL
-        logger.debug(
+        logger.info(
             f"    Uploading {file_path} to S3 bucket {os.getenv('S3_BUCKET_NAME')}"
         )
-        s3.upload_file(
-            file_path,
-            os.getenv("S3_BUCKET_NAME"),
-            file_name,
-            ExtraArgs={"ACL": "public-read"},
-        )
-        # Log successful upload
-        log_s3_upload_success(file_name)
+
+        # See if bucket exists
+        try:
+            logger.info(f"    Checking to see if {do_s3_bucket} S3 bucket exists")
+            s3.head_bucket(Bucket=do_s3_bucket)
+            bucket_exists = True
+            logger.info(f"Bucket {do_s3_bucket} exists.")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                logger.info(f"Bucket {do_s3_bucket} does not exist. Creating it")
+                s3.create_bucket(Bucket=do_s3_bucket)
+                bucket_exists = True
+            else:
+                logger.error(f"Error checking bucket: {e}")
+                raise
+
+        # If bucket exists
+        # Disable Current ACL Perms
+        if bucket_exists:
+            # Disable public access blocks (allows public ACLs)
+            s3.put_public_access_block(
+                Bucket=do_s3_bucket,
+                PublicAccessBlockConfiguration={
+                    "BlockPublicAcls": False,
+                    "IgnorePublicAcls": False,
+                    "BlockPublicPolicy": False,
+                    "RestrictPublicBuckets": False,
+                },
+            )
+            logger.info(
+                f"Public access block settings disabled for bucket {do_s3_bucket}"
+            )
+
+            # Set ownership to ObjectWriter (uploader sets ACLs)
+            s3.put_bucket_ownership_controls(
+                Bucket=do_s3_bucket,
+                OwnershipControls={
+                    "Rules": [{"ObjectOwnership": "ObjectWriter"}],
+                },
+            )
+            logger.info(f"Ownership controls set for bucket {do_s3_bucket}")
+
+            # Set bucket ACL to public-read
+            s3.put_bucket_acl(Bucket=do_s3_bucket, ACL="public-read")
+            logger.info(f"Bucket ACL set to 'public-read' for {do_s3_bucket}")
+
+            # Set to only public-read
+            s3.upload_file(
+                file_path,
+                os.getenv("S3_BUCKET_NAME"),
+                file_name,
+                ExtraArgs={"ACL": "public-read"},
+            )
+
+            # Log successful upload
+            log_s3_upload_success(file_name)
     except Exception as e:
         # Print an error message if the upload fails
         logger.error(f"Error uploading {file_name} to S3: {e}")
@@ -228,6 +282,58 @@ def parse_pgpass_file(pgpass_file_path: Optional[str]) -> Dict[str, str]:
         pass
 
     return credentials
+
+
+def generate_html_index(args, csv_files, base_url):
+    """
+    Generate a 1-column HTML index file with 'Datasets' header and CSV filenames as rows.
+
+    Args:
+        args: Command line arguments
+        csv_files: List of CSV file names processed
+    """
+    # Create the HTML content for a 1-column table
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <title>CSV Files Index</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>CSV Files Index</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Datasets</th>
+            </tr>
+        </thead>
+        <tbody>
+"""
+
+    # Add rows for each CSV file with hyperlinks
+    for csv_file in csv_files:
+
+        # Create the full URL
+        full_url = f"https://{base_url}/{csv_file}"
+
+        # Add table row with hyperlink
+        html_content += f"            <tr>\n"
+        html_content += f'                <td><a href="{full_url}", target="_blank">{csv_file}</a></td>\n'
+        html_content += f"            </tr>\n"
+
+    # Close the HTML
+    html_content += """        </tbody>
+    </table>
+</body>
+</html>"""
+
+    return html_content
 
 
 def process_sql_file(file_path: str, args, output_dir: str, input_sql_dir: str) -> None:
@@ -329,10 +435,17 @@ def main() -> None:
         help="Path to PostgreSQL CA certificate file for SSL connection",
     )
     optional_args.add_argument(
+        "--html-loc",
+        default="sprocket-public-datasets.nyc3.cdn.digitaloceanspaces.com/datasets",
+        required=False,
+        help="Base URL for constructing dataset links.",
+    )
+    optional_args.add_argument(
         "--version",
         action="store_true",
         help="Show version information",
     )
+
     args = parser.parse_args()
 
     # Get package metadata from pyproject.toml for version and author information
@@ -366,6 +479,9 @@ def main() -> None:
     # Process each SQL file in the input directory
     logger.info(f"Processing SQL files in directory: {args.input_sql_dir}")
 
+    # Keep track of processed CSV files for index generation
+    csv_files = []
+
     def process_sql_files(args):
         """Helper function to process SQL files with recursive or non-recursive behavior."""
         if not args.no_recursive:
@@ -374,19 +490,43 @@ def main() -> None:
                 for file in files:
                     if file.endswith(".sql"):
                         file_path = os.path.join(root, file)
+                        # Process the file and collect CSV file name
                         process_sql_file(
                             file_path, args, args.output_dir, args.input_sql_dir
                         )
+                        # Extract CSV file name and add to list
+                        file_name = os.path.basename(file_path)
+                        csv_file_name = file_name.replace(".sql", ".csv")
+                        csv_files.append(csv_file_name)
         else:
             # Non-recursive behavior (when --no-recursive is specified)
             for file in os.listdir(args.input_sql_dir):
                 if file.endswith(".sql"):
                     file_path = os.path.join(args.input_sql_dir, file)
+                    # Process the file and collect CSV file name
                     process_sql_file(
                         file_path, args, args.output_dir, args.input_sql_dir
                     )
+                    # Extract CSV file name and add to list
+                    file_name = os.path.basename(file_path)
+                    csv_file_name = file_name.replace(".sql", ".csv")
+                    csv_files.append(csv_file_name)
 
     process_sql_files(args)
+
+    # Generate and upload HTML index file
+    if csv_files:
+        logger.info("Generating HTML index file")
+        html_content = generate_html_index(args, csv_files, args.html_loc)
+
+        # Write HTML index to a file
+        html_file_path = os.path.join(args.output_dir, "index.html")
+        with open(html_file_path, "w") as f:
+            f.write(html_content)
+
+        # Upload the HTML index file to S3
+        upload_to_s3("index.html", html_file_path)
+
     logger.info("SQL to CSV conversion process completed")
 
 
